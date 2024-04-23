@@ -1,0 +1,137 @@
+package com.shopme.admin.product;
+
+import java.util.Date;
+import java.util.List;
+import java.util.NoSuchElementException;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.stereotype.Service;
+
+import com.shopme.admin.paging.PagingAndSortingHelper;
+import com.shopme.common.entity.Product;
+import com.shopme.common.exception.ProductNotFoundException;
+
+import jakarta.transaction.Transactional;
+@Service
+@Transactional
+public class ProductService {
+	public static final int PRODUCT_PER_PAGE = 8;	 
+	@Autowired
+	private ProductRepository repo;
+	
+	public List<Product> findAllProduct(){
+		return (List) repo.findAll();
+	}
+	
+	public Page<Product> listByPage(int pageNum, String sortField, String sortDir, String keyword, Integer catId){
+		Sort sort = Sort.by(sortField);
+		sort = sortDir.equals("asc") ? sort.ascending() : sort.descending();
+		Pageable pageable = PageRequest.of(pageNum - 1, PRODUCT_PER_PAGE, sort);
+		if(keyword!=null && !keyword.isEmpty()) {
+			if(catId!=null && catId>0) {
+				String categoryIdMatch = "-" + String.valueOf(catId) + "-";
+				return repo.searchInCategory(catId, categoryIdMatch, keyword, pageable);
+			}
+			return repo.findAll(keyword, pageable);
+		}
+		if(catId!=null && catId>0) {
+			String categoryIdMatch = "-" + String.valueOf(catId) + "-";
+			return repo.findAllInCategory(catId, categoryIdMatch, pageable);
+		}
+		return repo.findAll(pageable);
+	}
+	
+	public void delete(Integer id) throws ProductNotFoundException {
+		Long countById = repo.countById(id);
+		
+		if (countById == null || countById == 0) {
+			throw new ProductNotFoundException("Could not find any product with ID " + id);			
+		}
+		
+		repo.deleteById(id);
+	}
+
+	public void updateProductEnabledStatus(Integer id, boolean enabled) {
+		repo.updateEnabledStatus(id, enabled);
+		
+	}	
+	
+	public Product save(Product product) {
+		if (product.getId() == null) {
+			product.setCreatedTime(new Date());
+		}
+		
+		if (product.getAlias() == null || product.getAlias().isEmpty()) {
+			String defaultAlias = product.getName().replaceAll(" ", "-");
+			product.setAlias(defaultAlias);
+		} else {
+			product.setAlias(product.getAlias().replaceAll(" ", "-"));
+		}
+		
+		product.setUpdatedTime(new Date());
+		
+		Product updatedProduct = repo.save(product);
+		
+		return updatedProduct;
+	}
+	
+	public boolean isUnique(Integer id, String name) {
+		boolean result = true;
+		boolean isCreateNew = (id==null || id==0) ? true : false;
+		Product productDB = repo.findByName(name);
+		if(isCreateNew) {
+			if(productDB!=null) {
+				result=false;
+			}
+		}
+		else {
+			if(!id.equals(productDB.getId())) {
+				result= false;
+			}
+		}
+		return result;
+	}
+	
+	public void updateStatus(Integer id, boolean status) throws ProductNotFoundException {
+		Long count = repo.countById(id);
+		if(count==0 || count ==  null) {
+			throw new ProductNotFoundException("Could not find user with ID: " + id);
+		}
+		if(status==true) {
+			repo.updateEnabledStatus(false, id);
+		}
+		else {
+			repo.updateEnabledStatus(true, id);
+		}
+	}
+	
+	public Product get(Integer id) throws ProductNotFoundException {
+		try {
+			return repo.findById(id).get();
+		} catch (NoSuchElementException e) {
+			throw new ProductNotFoundException("Could not find any product with id: "+id);
+		}
+	}
+
+	public void saveProductPrice(Product productInForm) {
+		Product productInDB = repo.findById(productInForm.getId()).get();
+		productInDB.setCost(productInForm.getCost());
+		productInDB.setPrice(productInForm.getPrice());
+		productInDB.setDiscountPercent(productInForm.getDiscountPercent());
+		
+		repo.save(productInDB);
+	}
+	
+	public void searchProducts(int pageNum, PagingAndSortingHelper helper) {
+		Pageable pageable = helper.createPageable(PRODUCT_PER_PAGE, pageNum);
+		String keyword = helper.getKeyword();		
+		Page<Product> page = repo.searchProductsByName(keyword, pageable);		
+		helper.updateModelAttributes(pageNum, page);
+	}
+	
+	
+}
